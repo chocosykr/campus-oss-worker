@@ -1,7 +1,6 @@
 import express from 'express';
 import { Queue } from 'bullmq';
 import { JobPayload } from './types';
-import 'dotenv/config';
 
 const app = express();
 app.use(express.json());
