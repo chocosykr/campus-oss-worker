@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { Worker, Job } from 'bullmq';
 import { executeCode } from './executor';
 import { JobPayload } from './types';

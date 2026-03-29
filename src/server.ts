@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import { Queue } from 'bullmq';
 import { JobPayload } from './types';
