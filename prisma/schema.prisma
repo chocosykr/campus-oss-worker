@@ -1,9 +1,45 @@
+// campus-oss-worker/prisma/schema.prisma
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider  = "postgresql"
+  provider = "postgresql"
+}
+
+
+model Submission {
+  id           String     @id @default(cuid())
+  userId       String
+  assignmentId String
+  code         String     @db.Text
+  language     String
+  testResults  Json?
+  status       Status     @default(PENDING)
+
+  assignment   Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+
+  createdAt    DateTime   @default(now())
+
+  @@unique([userId, assignmentId])
+}
+
+model Assignment {
+  id          String     @id @default(cuid())
+  title       String
+  language    String
+  testCases   TestCase[]
+  submissions Submission[]
+}
+
+model TestCase {
+  id             String     @id @default(cuid())
+  assignmentId   String
+  input          String     @db.Text
+  expectedOutput String     @db.Text
+  hidden         Boolean    @default(false)
+  assignment     Assignment @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
 }
 
 enum Status {
@@ -12,15 +48,4 @@ enum Status {
   REVIEWED
   APPROVED
   REJECTED
-}
-
-model Submission {
-  id           String    @id @default(cuid())
-  userId       String
-  assignmentId String
-  code         String
-  language     String
-  testResults  Json?
-  status       Status    @default(PENDING)
-  createdAt    DateTime  @default(now())
 }

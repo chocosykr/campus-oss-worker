@@ -6,4 +6,4 @@ RUN adduser -D runner && chown -R runner:runner /app
 
 USER runner
 
-CMD ["sh", "-c", "javac /app/solution.java && java -cp /app solution"]
+CMD ["sh", "-c", "javac /app/Solution.java && java -cp /app Solution"]

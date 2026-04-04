@@ -1,8 +1,8 @@
 import { exec } from 'child_process';
-import { writeFile, unlink } from 'fs/promises';
+import { writeFile, mkdir, rm } from 'fs/promises';
 import { promisify } from 'util';
 import path from 'path';
-import { Language, ExecutionResult } from './types';
+import { Language, TestCase, GradeResult } from './types';
 
 const execAsync = promisify(exec);
 
@@ -13,62 +13,115 @@ const IMAGE_MAP: Record<Language, string> = {
   cpp: 'code-runner-cpp',
 };
 
-const FILE_EXTENSION: Record<Language, string> = {
-  javascript: 'js',
-  python: 'py',
-  java: 'java',
-  cpp: 'cpp',
+// Filename must be specific for Java
+const FILE_NAME: Record<Language, string> = {
+  javascript: 'solution.js',
+  python: 'solution.py',
+  java: 'Solution.java',
+  cpp: 'solution.cpp',
 };
 
-const TIMEOUT_MS = 10000; // 10 seconds
-
-export async function executeCode(
+export async function executeTestSuite(
   submissionId: string,
   code: string,
-  language: Language
-): Promise<ExecutionResult> {
-  const ext = FILE_EXTENSION[language];
+  language: Language,
+  testCases: TestCase[]
+): Promise<GradeResult> {
+  const filename = FILE_NAME[language];
   const image = IMAGE_MAP[language];
-  const tmpFile = `/tmp/${submissionId}.${ext}`;
-  const containerFile = language === 'java' ? '/app/solution.java' : `/app/solution.${ext}`;
+  
+  const tmpDir = path.join('/tmp', `submission-${submissionId}`);
+  await mkdir(tmpDir, { recursive: true });
+  
+  const codePath = path.join(tmpDir, filename);
+  const inputPath = path.join(tmpDir, 'input.txt');
 
-  // Write code to temp file
-  await writeFile(tmpFile, code);
+  await writeFile(codePath, code);
 
+  // 1. Pre-Execution Setup (Compilation)
+  let runCmd = '';
   try {
-    const command = [
-      'docker run',
-      '--rm',
-      '--network none',
-      '--memory 256m',
-      '--cpus 0.5',
-      `--name submission-${submissionId}`,
-      `-v ${tmpFile}:${containerFile}`,
-      image,
-    ].join(' ');
-
-    const { stdout, stderr } = await execAsync(command, {
-      timeout: TIMEOUT_MS,
-    });
-
-    return { stdout, stderr, exitCode: 0, timedOut: false };
-
-  } catch (err: any) {
-    const timedOut = err.killed || err.signal === 'SIGTERM';
-
-    // Kill container if it's still running after timeout
-    if (timedOut) {
-      await execAsync(`docker kill submission-${submissionId}`).catch(() => {});
+    if (language === 'cpp') {
+        // Compile once
+        await execAsync(`docker run --rm --network none --memory 256m --cpus 0.5 -v ${tmpDir}:/app ${image} g++ /app/solution.cpp -o /app/solution`);
+        runCmd = '/app/solution';
+    } else if (language === 'java') {
+        // Compile once
+       await execAsync(`docker run --rm --network none --memory 256m --cpus 0.5 -v ${tmpDir}:/app ${image} javac /app/Solution.java`);
+        runCmd = 'java -cp /app Solution';
+    } else if (language === 'javascript') {
+        runCmd = 'node /app/solution.js';
+    } else if (language === 'python') {
+        runCmd = 'python3 /app/solution.py';
     }
-
-    return {
-      stdout: err.stdout ?? '',
-      stderr: err.stderr ?? err.message,
-      exitCode: err.code ?? 1,
-      timedOut,
-    };
-  } finally {
-    // Always clean up temp file
-    await unlink(tmpFile).catch(() => {});
+  } catch (compileErr: any) {
+      await rm(tmpDir, { recursive: true, force: true });
+      return {
+          total: testCases.length,
+          passed: 0,
+          failed: testCases.length,
+          details: testCases.map(tc => ({
+              testCaseId: tc.id,
+              passed: false,
+              actualOutput: '',
+              expectedOutput: tc.expectedOutput,
+              error: `Compilation Error: ${compileErr.stderr || compileErr.message}`,
+              hidden: tc.hidden
+          }))
+      };
   }
+
+  const details = [];
+  let passedCount = 0;
+
+  // 2. Loop through test cases
+  for (const tc of testCases) {
+    try {
+      await writeFile(inputPath, tc.input);
+
+      const command = `docker run --rm -i \
+        --network none \
+        --memory 256m \
+        --cpus 0.5 \
+        -v ${tmpDir}:/app \
+        ${image} \
+        /bin/sh -c "${runCmd} < /app/input.txt"`;
+
+      const { stdout } = await execAsync(command, { timeout: 5000 });
+
+      const actualOutput = stdout.trim();
+      const expectedOutput = tc.expectedOutput.trim();
+      const passed = actualOutput === expectedOutput;
+
+      if (passed) passedCount++;
+
+      details.push({
+        testCaseId: tc.id,
+        passed,
+        actualOutput,
+        expectedOutput: tc.expectedOutput,
+        hidden: tc.hidden
+      });
+
+    } catch (err: any) {
+      details.push({
+        testCaseId: tc.id,
+        passed: false,
+        actualOutput: '',
+        expectedOutput: tc.expectedOutput,
+        error: err.killed ? "Time Limit Exceeded" : (err.stderr || err.message),
+        hidden: tc.hidden
+      });
+    }
+  }
+
+  // 3. Final Cleanup
+  await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+
+  return {
+    total: testCases.length,
+    passed: passedCount,
+    failed: testCases.length - passedCount,
+    details
+  };
 }

@@ -3,10 +3,12 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  
   "scripts": {
     "dev": "ts-node src/worker.ts",
     "build": "prisma generate && tsc",
-    "start": "node dist/worker.js"
+    "start": "node dist/worker.js",
+    "db:push": "dotenv -e .env -- prisma db push"
   },
   "keywords": [],
   "author": "",
@@ -25,8 +27,9 @@
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
-    "@types/node": "^25.5.0",
+    "@types/node": "^25.5.2",
     "@types/pg": "^8.20.0",
+    "dotenv-cli": "^11.0.0",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.2"
   }
